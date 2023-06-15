@@ -74,19 +74,23 @@ class SamOnnxModel(nn.Module):
         return mask_embedding
 
     def mask_postprocessing(self, masks: torch.Tensor, orig_im_size: torch.Tensor) -> torch.Tensor:
-        masks = F.interpolate(
-            masks,
-            size=(self.img_size, self.img_size),
-            mode="bilinear",
-            align_corners=False,
-        )
+        # This code has been commented out making mask_postprocessing a no-op. This was done because coremltools does
+        # not support the interpolate operator as used here. AFAICT, this code is only used if the return_extra_metrics
+        # flag is enabled in the onnx model, which is not the case for the models we use in production.
 
-        prepadded_size = self.resize_longest_image_size(orig_im_size, self.img_size).to(torch.int64)
-        masks = masks[..., : prepadded_size[0], : prepadded_size[1]]  # type: ignore
-
-        orig_im_size = orig_im_size.to(torch.int64)
-        h, w = orig_im_size[0], orig_im_size[1]
-        masks = F.interpolate(masks, size=(h, w), mode="bilinear", align_corners=False)
+        # masks = F.interpolate(
+        #     masks,
+        #     size=(self.img_size, self.img_size),
+        #     mode="bilinear",
+        #     align_corners=False,
+        # )
+        #
+        # prepadded_size = self.resize_longest_image_size(orig_im_size, self.img_size).to(torch.int64)
+        # masks = masks[..., : prepadded_size[0], : prepadded_size[1]]  # type: ignore
+        #
+        # orig_im_size = orig_im_size.to(torch.int64)
+        # h, w = orig_im_size[0], orig_im_size[1]
+        # masks = F.interpolate(masks, size=(h, w), mode="bilinear", align_corners=False)
         return masks
 
     def select_masks(
