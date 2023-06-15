@@ -109,6 +109,15 @@ class MaskDecoder(nn.Module):
         # Prepare output
         return masks, iou_pred
 
+    # This method replaces torch.repeat_interleave with dim=0 as used here,
+    # required as repeat_interleave is not supported by coremltools
+    @staticmethod
+    def _repeat_interleave(x, n, dim=0) -> torch.Tensor:
+        # e.g. x=[1, 2, 3], n=2 => returns [1, 1, 2, 2, 3, 3]
+        i = torch.arange(x.size()[0] * n, device=x.device)
+        y = torch.index_select(x, 0, torch.tensor(i // n))
+        return y
+
     def predict_masks(
         self,
         image_embeddings: torch.Tensor,
@@ -123,9 +132,11 @@ class MaskDecoder(nn.Module):
         tokens = torch.cat((output_tokens, sparse_prompt_embeddings), dim=1)
 
         # Expand per-image data in batch direction to be per-mask
-        src = torch.repeat_interleave(image_embeddings, tokens.shape[0], dim=0)
+        # src = torch.repeat_interleave(image_embeddings, tokens.shape[0], dim=0)
+        src = self._repeat_interleave(image_embeddings, tokens.shape[0])
         src = src + dense_prompt_embeddings
-        pos_src = torch.repeat_interleave(image_pe, tokens.shape[0], dim=0)
+        # pos_src = torch.repeat_interleave(image_pe, tokens.shape[0], dim=0)
+        pos_src = self._repeat_interleave(image_pe, tokens.shape[0])
         b, c, h, w = src.shape
 
         # Run the transformer
