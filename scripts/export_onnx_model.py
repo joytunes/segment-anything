@@ -108,7 +108,7 @@ def run_export(
     sam = sam_model_registry[model_type](checkpoint=checkpoint)
 
     onnx_model = SamOnnxModel(
-        model=sam,
+        not_model=sam,
         return_single_mask=return_single_mask,
         use_stability_score=use_stability_score,
         return_extra_metrics=return_extra_metrics,

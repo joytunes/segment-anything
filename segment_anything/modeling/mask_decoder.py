@@ -114,8 +114,8 @@ class MaskDecoder(nn.Module):
     @staticmethod
     def _repeat_interleave(x, n, dim=0) -> torch.Tensor:
         # e.g. x=[1, 2, 3], n=2 => returns [1, 1, 2, 2, 3, 3]
-        i = torch.arange(x.size()[0] * n, device=x.device)
-        y = torch.index_select(x, 0, torch.tensor(i // n))
+        i = torch.as_tensor(torch.arange(x.size()[0] * n, device=x.device) // n, dtype=torch.int32)
+        y = torch.index_select(x, 0, i)
         return y
 
     def predict_masks(
