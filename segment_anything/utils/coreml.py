@@ -45,7 +45,7 @@ class SamEmbedder(torch.nn.Module):
         # Transform the image to the form expected by the model
         # input_image = self.transform.apply_image(image)
         # input_image_torch = torch.as_tensor(input_image, device=self.device)
-        input_image_torch = image.contiguous()[None, :, :, :]
+        input_image_torch = image.contiguous() #[None, :, :, :]
 
         assert (
                 len(input_image_torch.shape) == 4
