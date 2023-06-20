@@ -6,7 +6,11 @@ sys.path.append('..')
 from segment_anything import sam_model_registry
 from segment_anything.utils.coreml import SamEmbedder, SamPointDecoder
 
-checkpoint_dir = '.' #'/Users/anatoli/Documents/segment-anything/checkpoints'
+checkpoint_dir = '/Users/anatoli/Documents/segment-anything/checkpoints' # '.'
+
+linear_quantize = False
+palettize = True
+only_compress_embedder = True
 
 model_type = 'vit_b' # 'vit_b', 'vit_l' or 'vit_h'
 if model_type == 'vit_h':
@@ -77,5 +81,44 @@ image_embedder_coreml_model = ct.convert(
     minimum_deployment_target=ct.target.iOS15
 )
 
-point_decoder_coreml_model.save(f"point_decoder_{model_type}.mlpackage")
-image_embedder_coreml_model.save(f"image_embedder_{model_type}.mlpackage")
+point_decoder_save_path = f"point_decoder_{model_type}.mlpackage"
+image_embedder_save_path = f"image_embedder_{model_type}.mlpackage"
+point_decoder_coreml_model.save(point_decoder_save_path)
+image_embedder_coreml_model.save(image_embedder_save_path)
+
+if palettize or linear_quantize:
+    # Note that these all require coremltools 7.0b1 or later
+    if not only_compress_embedder:
+        loaded_decoder_model = ct.models.MLModel(point_decoder_save_path)
+    loaded_embedder_model = ct.models.MLModel(image_embedder_save_path)
+
+    if linear_quantize:
+        import coremltools.optimize.coreml as cto
+
+        lq_op_config = cto.OpLinearQuantizerConfig(mode="linear_symmetric", weight_threshold=512)
+        lq_config = cto.OptimizationConfig(global_config=lq_op_config)
+
+        if not only_compress_embedder:
+            loaded_decoder_model = cto.linear_quantize_weights(loaded_decoder_model, config=lq_config)
+            point_decoder_save_path = f"quantized_{point_decoder_save_path}"
+        loaded_embedder_model = cto.linear_quantize_weights(loaded_embedder_model, config=lq_config)
+        image_embedder_save_path = f"quantized_{image_embedder_save_path}"
+
+    if palettize:
+        from coremltools.optimize.coreml import (
+            OpPalettizerConfig,
+            OptimizationConfig,
+            palettize_weights,
+        )
+
+        op_config = OpPalettizerConfig(mode="kmeans", nbits=6, weight_threshold=512)
+        config = OptimizationConfig(global_config=op_config)
+        if not only_compress_embedder:
+            loaded_decoder_model = palettize_weights(loaded_decoder_model, config=config)
+            point_decoder_save_path = f"palettized_{point_decoder_save_path}"
+        loaded_embedder_model = palettize_weights(loaded_embedder_model, config=config)
+        image_embedder_save_path = f"palettized_{image_embedder_save_path}"
+
+    if not only_compress_embedder:
+        loaded_decoder_model.save(point_decoder_save_path)
+    loaded_embedder_model.save(image_embedder_save_path)
