@@ -24,16 +24,15 @@ class SamOnnxModel(nn.Module):
 
     def __init__(
         self,
-        not_model: Sam,
+        model: Sam,
         return_single_mask: bool,
         use_stability_score: bool = False,
         return_extra_metrics: bool = False,
     ) -> None:
         super().__init__()
-        self.mask_decoder = not_model.mask_decoder
-        self.prompt_encoder = not_model.prompt_encoder
-        self.mask_threshold = not_model.mask_threshold
-        self.img_size = not_model.image_encoder.img_size
+        self.mask_decoder = model.mask_decoder
+        self.model = model
+        self.img_size = model.image_encoder.img_size
         self.return_single_mask = return_single_mask
         self.use_stability_score = use_stability_score
         self.stability_score_offset = 1.0
@@ -52,46 +51,42 @@ class SamOnnxModel(nn.Module):
     def _embed_points(self, point_coords: torch.Tensor, point_labels: torch.Tensor) -> torch.Tensor:
         point_coords = point_coords + 0.5
         point_coords = point_coords / self.img_size
-        point_embedding = self.prompt_encoder.pe_layer._pe_encoding(point_coords)
+        point_embedding = self.model.prompt_encoder.pe_layer._pe_encoding(point_coords)
         point_labels = point_labels.unsqueeze(-1).expand_as(point_embedding)
 
         point_embedding = point_embedding * (point_labels != -1)
-        point_embedding = point_embedding + self.prompt_encoder.not_a_point_embed.weight * (
+        point_embedding = point_embedding + self.model.prompt_encoder.not_a_point_embed.weight * (
             point_labels == -1
         )
 
-        for i in range(self.prompt_encoder.num_point_embeddings):
-            point_embedding = point_embedding + self.prompt_encoder.point_embeddings[
+        for i in range(self.model.prompt_encoder.num_point_embeddings):
+            point_embedding = point_embedding + self.model.prompt_encoder.point_embeddings[
                 i
             ].weight * (point_labels == i)
 
         return point_embedding
 
     def _embed_masks(self, input_mask: torch.Tensor, has_mask_input: torch.Tensor) -> torch.Tensor:
-        mask_embedding = has_mask_input * self.prompt_encoder.mask_downscaling(input_mask)
+        mask_embedding = has_mask_input * self.model.prompt_encoder.mask_downscaling(input_mask)
         mask_embedding = mask_embedding + (
             1 - has_mask_input
-        ) * self.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1)
+        ) * self.model.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1)
         return mask_embedding
 
     def mask_postprocessing(self, masks: torch.Tensor, orig_im_size: torch.Tensor) -> torch.Tensor:
-        # This code has been commented out making mask_postprocessing a no-op. This was done because coremltools does
-        # not support the interpolate operator as used here. This is what produces the upsacaled masks that are the
-        # main output of the model.
+        masks = F.interpolate(
+            masks,
+            size=(self.img_size, self.img_size),
+            mode="bilinear",
+            align_corners=False,
+        )
 
-        # masks = F.interpolate(
-        #     masks,
-        #     size=(self.img_size, self.img_size),
-        #     mode="bilinear",
-        #     align_corners=False,
-        # )
-        #
-        # prepadded_size = self.resize_longest_image_size(orig_im_size, self.img_size).to(torch.int64)
-        # masks = masks[..., : prepadded_size[0], : prepadded_size[1]]  # type: ignore
-        #
-        # orig_im_size = orig_im_size.to(torch.int64)
-        # h, w = orig_im_size[0], orig_im_size[1]
-        # masks = F.interpolate(masks, size=(h, w), mode="bilinear", align_corners=False)
+        prepadded_size = self.resize_longest_image_size(orig_im_size, self.img_size).to(torch.int64)
+        masks = masks[..., : prepadded_size[0], : prepadded_size[1]]  # type: ignore
+
+        orig_im_size = orig_im_size.to(torch.int64)
+        h, w = orig_im_size[0], orig_im_size[1]
+        masks = F.interpolate(masks, size=(h, w), mode="bilinear", align_corners=False)
         return masks
 
     def select_masks(
@@ -100,7 +95,7 @@ class SamOnnxModel(nn.Module):
         # Determine if we should return the multiclick mask or not from the number of points.
         # The reweighting is used to avoid control flow.
         score_reweight = torch.tensor(
-            [[1000] + [0] * (self.mask_decoder.num_mask_tokens - 1)]
+            [[1000] + [0] * (self.model.mask_decoder.num_mask_tokens - 1)]
         ).to(iou_preds.device)
         score = iou_preds + (num_points - 2.5) * score_reweight
         best_idx = torch.argmax(score, dim=1)
@@ -122,16 +117,16 @@ class SamOnnxModel(nn.Module):
         sparse_embedding = self._embed_points(point_coords, point_labels)
         dense_embedding = self._embed_masks(mask_input, has_mask_input)
 
-        masks, scores = self.mask_decoder.predict_masks(
+        masks, scores = self.model.mask_decoder.predict_masks(
             image_embeddings=image_embeddings,
-            image_pe=self.prompt_encoder.get_dense_pe(),
+            image_pe=self.model.prompt_encoder.get_dense_pe(),
             sparse_prompt_embeddings=sparse_embedding,
             dense_prompt_embeddings=dense_embedding,
         )
 
         if self.use_stability_score:
             scores = calculate_stability_score(
-                masks, self.mask_threshold, self.stability_score_offset
+                masks, self.model.mask_threshold, self.stability_score_offset
             )
 
         if self.return_single_mask:
@@ -141,9 +136,9 @@ class SamOnnxModel(nn.Module):
 
         if self.return_extra_metrics:
             stability_scores = calculate_stability_score(
-                upscaled_masks, self.mask_threshold, self.stability_score_offset
+                upscaled_masks, self.model.mask_threshold, self.stability_score_offset
             )
-            areas = (upscaled_masks > self.mask_threshold).sum(-1).sum(-1)
+            areas = (upscaled_masks > self.model.mask_threshold).sum(-1).sum(-1)
             return upscaled_masks, scores, stability_scores, areas, masks
 
         return upscaled_masks, scores, masks
