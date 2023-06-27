@@ -87,14 +87,9 @@ image_embedder_coreml_model = ct.convert(
 
 point_decoder_save_path = f"point_decoder_{'ios_15_compatible_' if enforce_ios15_compatibility else ''}{model_type}.mlpackage"
 image_embedder_save_path = f"image_embedder_{'ios_15_compatible_' if enforce_ios15_compatibility else ''}{model_type}.mlpackage"
-point_decoder_coreml_model.save(point_decoder_save_path)
-image_embedder_coreml_model.save(image_embedder_save_path)
 
 if (palettize or linear_quantize) and not enforce_ios15_compatibility:
     # Note that these all require coremltools 7.0b1 or later, and are incompatible with iOS<=15
-    if not only_compress_embedder:
-        loaded_decoder_model = ct.models.MLModel(point_decoder_save_path)
-    loaded_embedder_model = ct.models.MLModel(image_embedder_save_path)
 
     if linear_quantize:
         import coremltools.optimize.coreml as cto
@@ -103,9 +98,9 @@ if (palettize or linear_quantize) and not enforce_ios15_compatibility:
         lq_config = cto.OptimizationConfig(global_config=lq_op_config)
 
         if not only_compress_embedder:
-            loaded_decoder_model = cto.linear_quantize_weights(loaded_decoder_model, config=lq_config)
+            point_decoder_coreml_model = cto.linear_quantize_weights(point_decoder_coreml_model, config=lq_config)
             point_decoder_save_path = f"quantized_{point_decoder_save_path}"
-        loaded_embedder_model = cto.linear_quantize_weights(loaded_embedder_model, config=lq_config)
+        image_embedder_coreml_model = cto.linear_quantize_weights(image_embedder_coreml_model, config=lq_config)
         image_embedder_save_path = f"quantized_{image_embedder_save_path}"
 
     if palettize:
@@ -118,15 +113,14 @@ if (palettize or linear_quantize) and not enforce_ios15_compatibility:
         op_config = OpPalettizerConfig(mode="kmeans", nbits=6, weight_threshold=512)
         config = OptimizationConfig(global_config=op_config)
         if not only_compress_embedder:
-            loaded_decoder_model = palettize_weights(loaded_decoder_model, config=config)
+            point_decoder_coreml_model = palettize_weights(point_decoder_coreml_model, config=config)
             point_decoder_save_path = f"palettized_{point_decoder_save_path}"
-        loaded_embedder_model = palettize_weights(loaded_embedder_model, config=config)
+        image_embedder_coreml_model = palettize_weights(image_embedder_coreml_model, config=config)
         image_embedder_save_path = f"palettized_{image_embedder_save_path}"
 
     if not only_compress_embedder:
-        loaded_decoder_model.save(point_decoder_save_path)
-    loaded_embedder_model.save(image_embedder_save_path)
-
+        point_decoder_coreml_model.save(point_decoder_save_path)
+    image_embedder_coreml_model.save(image_embedder_save_path)
 
 git_status = subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'])
 is_git_status_clean = len(git_status) == 0
@@ -135,3 +129,6 @@ if not is_git_status_clean:
 git_commit = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
 point_decoder_coreml_model.version = f'Simply segment-anything git_commit: {git_commit}; time: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}; internal name: {point_decoder_save_path}'
 image_embedder_coreml_model.version = f'Simply segment-anything git_commit: {git_commit}; time: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}; internal name: {image_embedder_save_path}'
+
+point_decoder_coreml_model.save(point_decoder_save_path)
+image_embedder_coreml_model.save(image_embedder_save_path)
