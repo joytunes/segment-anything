@@ -172,7 +172,7 @@ class SamPointDecoder(nn.Module):
             image_embeddings=image_embeddings,
             image_pe=self.prompt_encoder.get_dense_pe(),
             sparse_prompt_embeddings=sparse_embedding,
-            dense_prompt_embeddings=dense_embedding,
+            dense_prompt_embeddings=dense_embedding,    
         )
 
         if self.use_stability_score:

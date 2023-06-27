@@ -1,3 +1,5 @@
+import datetime
+import subprocess
 import torch
 import coremltools as ct
 import sys
@@ -124,3 +126,12 @@ if (palettize or linear_quantize) and not enforce_ios15_compatibility:
     if not only_compress_embedder:
         loaded_decoder_model.save(point_decoder_save_path)
     loaded_embedder_model.save(image_embedder_save_path)
+
+
+git_status = subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'])
+is_git_status_clean = len(git_status) == 0
+if not is_git_status_clean:
+    raise Exception(f'git status is not clean:\n{git_status}')
+git_commit = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
+point_decoder_coreml_model.version = f'Simply segment-anything git_commit: {git_commit}; time: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}; internal name: {point_decoder_save_path}'
+image_embedder_coreml_model.version = f'Simply segment-anything git_commit: {git_commit}; time: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}; internal name: {image_embedder_save_path}'
