@@ -8,9 +8,15 @@ from segment_anything.utils.coreml import SamEmbedder, SamPointDecoder
 
 checkpoint_dir = '/Users/anatoli/Documents/segment-anything/checkpoints' # '.'
 
-linear_quantize = False
+linear_quantize = True
 palettize = True
 only_compress_embedder = True
+enforce_ios15_compatibility = True
+
+if enforce_ios15_compatibility:
+    linear_quantize = False
+    palettize = False
+    only_compress_embedder = None
 
 model_type = 'vit_b' # 'vit_b', 'vit_l' or 'vit_h'
 if model_type == 'vit_h':
@@ -24,7 +30,7 @@ else:
 
 
 sam = sam_model_registry[model_type](checkpoint=os.path.join(checkpoint_dir, checkpoint))
-point_decoder_model = SamPointDecoder(sam, return_single_mask=False)
+point_decoder_model = SamPointDecoder(sam, return_single_mask=True)
 image_embedder_model = SamEmbedder(sam)
 
 embed_dim = sam.prompt_encoder.embed_dim
@@ -32,14 +38,12 @@ embed_size = sam.prompt_encoder.image_embedding_size
 mask_input_size = [4 * x for x in embed_size]
 point_decoder_dummy_inputs = {
     "image_embeddings": torch.randn(1, embed_dim, *embed_size, dtype=torch.float),
-    "point_coords": torch.randint(low=0, high=1024, size=(1, 5, 2), dtype=torch.float),
-    "point_labels": torch.randint(low=0, high=4, size=(1, 5), dtype=torch.float),
-    "mask_input": torch.randn(1, 1, *mask_input_size, dtype=torch.float),
-    "has_mask_input": torch.tensor([1], dtype=torch.float),
+    "points_and_box_coords": torch.randint(low=0, high=1024, size=(1, 7, 2), dtype=torch.float),
+    "points_and_box_labels": torch.randint(low=0, high=4, size=(1, 7), dtype=torch.float)
 }
 image_embedder_dummy_inputs = {
     # The image as a torch tensor in 3xHxW format, already transformed for input to the model.
-    'image': torch.randint(low=0, high=255, size=(1, 3, 1024, 1024), dtype=torch.float),
+    'image': torch.randint(low=0, high=256, size=(1, 3, 1024, 1024), dtype=torch.float),
 }
 
 
@@ -52,10 +56,8 @@ torch.jit.save(image_embedder_trace, f'image_embedder_{model_type}_model.pt')
 
 point_decoder_coreml_inputs = {
     "image_embeddings": ct.TensorType(name="image_embeddings", shape=point_decoder_dummy_inputs["image_embeddings"].size()),
-    "point_coords": ct.TensorType(name="point_coords", shape=point_decoder_dummy_inputs["point_coords"].size()),
-    "point_labels": ct.TensorType(name="point_labels", shape=point_decoder_dummy_inputs["point_labels"].size()),
-    "mask_input": ct.TensorType(name="mask_input", shape=point_decoder_dummy_inputs["mask_input"].size()),
-    "has_mask_input": ct.TensorType(name="has_mask_input", shape=point_decoder_dummy_inputs["has_mask_input"].size()),
+    "points_and_box_coords": ct.TensorType(name="point_coords", shape=point_decoder_dummy_inputs["points_and_box_coords"].size()),
+    "points_and_box_labels": ct.TensorType(name="point_labels", shape=point_decoder_dummy_inputs["points_and_box_labels"].size()),
 }
 point_decoder_coreml_outputs = {
     "iou_predictions": ct.TensorType(name="iou_predictions"),
@@ -65,7 +67,7 @@ point_decoder_coreml_model = ct.convert(
     point_decoder_trace,
     outputs=list(point_decoder_coreml_outputs.values()),
     inputs=list(point_decoder_coreml_inputs.values()),
-    minimum_deployment_target=ct.target.iOS15
+    minimum_deployment_target=ct.target.iOS14 if enforce_ios15_compatibility else ct.target.iOS16 # 14 is for iOS15, not a mistake
 )
 
 image_embedder_coreml_inputs = {
@@ -78,16 +80,16 @@ image_embedder_coreml_model = ct.convert(
     image_embedder_trace,
     outputs=list(image_embedder_coreml_outputs.values()),
     inputs=list(image_embedder_coreml_inputs.values()),
-    minimum_deployment_target=ct.target.iOS15
+    minimum_deployment_target=ct.target.iOS15 if enforce_ios15_compatibility else ct.target.iOS16
 )
 
-point_decoder_save_path = f"point_decoder_{model_type}.mlpackage"
-image_embedder_save_path = f"image_embedder_{model_type}.mlpackage"
+point_decoder_save_path = f"point_decoder_{'ios_15_compatible_' if enforce_ios15_compatibility else ''}{model_type}.mlpackage"
+image_embedder_save_path = f"image_embedder_{'ios_15_compatible_' if enforce_ios15_compatibility else ''}{model_type}.mlpackage"
 point_decoder_coreml_model.save(point_decoder_save_path)
 image_embedder_coreml_model.save(image_embedder_save_path)
 
-if palettize or linear_quantize:
-    # Note that these all require coremltools 7.0b1 or later
+if (palettize or linear_quantize) and not enforce_ios15_compatibility:
+    # Note that these all require coremltools 7.0b1 or later, and are incompatible with iOS<=15
     if not only_compress_embedder:
         loaded_decoder_model = ct.models.MLModel(point_decoder_save_path)
     loaded_embedder_model = ct.models.MLModel(image_embedder_save_path)

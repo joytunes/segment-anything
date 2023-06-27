@@ -124,7 +124,7 @@ class SamPointDecoder(nn.Module):
         self.stability_score_offset = 1.0
 
     def _embed_points(self, point_coords: torch.Tensor, point_labels: torch.Tensor) -> torch.Tensor:
-        point_coords = point_coords + 0.5
+        point_coords = (point_coords + 0.5) / self.prompt_encoder.input_image_size[0]
         point_embedding = self.prompt_encoder.pe_layer._pe_encoding(point_coords)
         point_labels = point_labels.unsqueeze(-1).expand_as(point_embedding)
 
@@ -140,12 +140,8 @@ class SamPointDecoder(nn.Module):
 
         return point_embedding
 
-    def _embed_masks(self, input_mask: torch.Tensor, has_mask_input: torch.Tensor) -> torch.Tensor:
-        mask_embedding = has_mask_input * self.prompt_encoder.mask_downscaling(input_mask)
-        mask_embedding = mask_embedding + (
-                1 - has_mask_input
-        ) * self.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1)
-        return mask_embedding
+    def _embed_masks(self) -> torch.Tensor:
+        return self.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1)
 
     def select_masks(
             self, masks: torch.Tensor, iou_preds: torch.Tensor, num_points: int
@@ -166,13 +162,11 @@ class SamPointDecoder(nn.Module):
     def forward(
             self,
             image_embeddings: torch.Tensor,
-            point_coords: torch.Tensor,
-            point_labels: torch.Tensor,
-            mask_input: torch.Tensor,
-            has_mask_input: torch.Tensor,
-    ):
-        sparse_embedding = self._embed_points(point_coords, point_labels)
-        dense_embedding = self._embed_masks(mask_input, has_mask_input)
+            points_and_box_coords: torch.Tensor,
+            points_and_box_labels: torch.Tensor,
+            ):
+        sparse_embedding = self._embed_points(points_and_box_coords, points_and_box_labels)
+        dense_embedding = self._embed_masks()
 
         masks, scores = self.mask_decoder.predict_masks(
             image_embeddings=image_embeddings,
@@ -187,6 +181,6 @@ class SamPointDecoder(nn.Module):
             )
 
         if self.return_single_mask:
-            masks, scores = self.select_masks(masks, scores, point_coords.shape[1])
+            masks, scores = self.select_masks(masks, scores, points_and_box_coords.shape[1])
 
         return scores, masks
