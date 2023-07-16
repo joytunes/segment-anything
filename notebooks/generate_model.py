@@ -13,7 +13,7 @@ checkpoint_dir = '/Users/anatoli/Documents/segment-anything/checkpoints' # '.'
 linear_quantize = True
 palettize = True
 only_compress_embedder = True
-enforce_ios15_compatibility = True
+enforce_ios15_compatibility = False
 
 if enforce_ios15_compatibility:
     linear_quantize = False
